@@ -1,0 +1,647 @@
+---
+title: "MHC report"
+author: "Diagnostics"
+output: pdf_document
+classoption: landscape
+data2: !r data2
+site: !r site
+---
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+ 
+library(tidyverse)
+library(lubridate)
+library(ggrepel)
+options(knitr.kable.NA = '')
+
+shcolor<-c(blue="#46C5E0", green="#02B68B", yellow="#FEC40E", orange="#F48020", red="#F48020", black="#383838", purple="#282561", indigo="#282C5C", white="#FFFFFF")
+
+##addq
+addq_dmy<-function(data, time_stamp){
+#enquo(data)
+time_stamp<-enquo(time_stamp)
+data%>%mutate(Quarter=quarter(dmy(!!time_stamp), with_year=TRUE))}
+addq_dmy_hms<-function(data, time_stamp){
+#enquo(data)
+time_stamp<-enquo(time_stamp)
+data%>%mutate(Quarter=quarter(dmy_hms(!!time_stamp), with_year=TRUE))}
+
+cumplot<-function(data, TAT, Quarter=Quarter){
+TAT<-enquo(TAT)
+Quarter<-enquo(Quarter)
+p90s<-data%>%group_by(!!Quarter)%>%summarize(p90=quantile(!!TAT,.9, na.rm=TRUE))
+
+data%>%
+ggplot(mapping=aes(x=!!TAT))+
+geom_line(mapping=aes(x=!!TAT, y=.9), color=shcolor["purple"])+
+stat_ecdf(geom="step", pad = FALSE, color=shcolor["blue"])+
+geom_text(p90s, mapping=aes(x=p90-10, y=.95, label=paste0("p90=",p90)), size=3)+
+geom_point(p90s, mapping=aes(x=p90, y=.9),color=shcolor["blue"])+
+facet_wrap(~Quarter)+
+theme_minimal()+
+labs(x="TAT in minutes",
+y="Percent running in, ie percentile")
+}
+
+volplot<-function(data, TAT, Quarter=Quarter){
+TAT<-enquo(TAT)
+Quarter<-enquo(Quarter)
+data%>%
+ggplot()+
+geom_histogram(mapping=aes(x=!!TAT),binwidth=5, color="light blue", fill="light blue")+
+facet_wrap(~Quarter)+
+theme_minimal()+
+labs(
+y="Test Utilization",
+x="TAT in m")
+}
+
+drawtable<-function(data,REQNO=REQNO,LAB_PHLEBOTOMY=LAB_PHLEBOTOMY,Quarter=Quarter){
+REQNO<-enquo(REQNO)
+LAB_PHLEBOTOMY<-enquo(LAB_PHLEBOTOMY)
+Quarter<-enquo(Quarter)
+data%>%distinct(!!REQNO,!!LAB_PHLEBOTOMY,!!Quarter)%>%
+ group_by(!!Quarter,!!LAB_PHLEBOTOMY)%>% summarize(cd=n())%>%
+ ungroup()%>%
+ pivot_wider(values_from=cd,names_from=LAB_PHLEBOTOMY)%>%
+ rename(LAB.PHLEBOTOMY=Yes,
+Non.Lab.Draws=No)
+	}
+
+volplot2<-function(data, TAT, Quarter=Quarter, LAB_PHLEBOTOMY=LAB_PHLEBOTOMY){
+TAT<-enquo(TAT)
+Quarter<-enquo(Quarter)
+LAB_PHLEBOTOMY<-enquo(LAB_PHLEBOTOMY)
+data%>%
+ggplot()+
+geom_histogram(mapping=aes(x=!!TAT, color=!!LAB_PHLEBOTOMY, fill=!!LAB_PHLEBOTOMY),binwidth=5, alpha=.5, position="identity")+
+facet_wrap(~Quarter)+
+theme_minimal()+
+labs(
+y="Test Utilization",
+x="TAT in m")
+}
+ 
+ cumplot2<-function(data, TAT, Quarter=Quarter, LAB_PHLEBOTOMY=LAB_PHLEBOTOMY){
+TAT<-enquo(TAT)
+Quarter<-enquo(Quarter)
+LAB_PHLEBOTOMY<-enquo(LAB_PHLEBOTOMY)
+p90s<-data%>%group_by(!!Quarter, !!LAB_PHLEBOTOMY)%>%summarize(p90=quantile(!!TAT,.9, na.rm=TRUE))
+
+data%>%
+mutate(cta=cume_dist(!!TAT))%>%
+ggplot(mapping=aes(x=!!TAT))+
+geom_line(mapping=aes(x=!!TAT, y=.9), color=shcolor["purple"])+
+geom_line(mapping=aes(y=cta, color=!!LAB_PHLEBOTOMY),linetype = "dotted")+
+stat_ecdf(mapping=aes(color=!!LAB_PHLEBOTOMY), geom="step", pad = FALSE)+
+geom_text(p90s, mapping=aes(x=p90-10, y=.95, color=!!LAB_PHLEBOTOMY, label=round(p90)), size=3)+
+geom_point(p90s, mapping=aes(x=p90, y=.9, color=!!LAB_PHLEBOTOMY))+
+facet_wrap(~Quarter)+
+theme_minimal()+
+labs(x="TAT in minutes",
+y="Percent running in, ie percentile")
+} 
+
+
+volplot3<-function(data, TAT, Quarter=Quarter, LAB_PHLEBOTOMY=LAB_PHLEBOTOMY){
+TAT<-enquo(TAT)
+LAB_PHLEBOTOMY<-enquo(LAB_PHLEBOTOMY)
+Quarter<-enquo(Quarter)
+
+ggplot()+
+geom_histogram(data%>%select(-!!LAB_PHLEBOTOMY),mapping=aes(x=!!TAT, y=..count.., fill="Highlighted group"),binwidth=15, alpha=.75, position="identity", fill=shcolor["purple"])+
+geom_vline(data, mapping=aes(xintercept=120), color="grey", alpha=.5)+
+geom_histogram(data,mapping=aes(x=!!TAT, y=..count..,fill="Highlighted group"),binwidth=15, position="identity",fill=shcolor["blue"])+
+  facet_wrap(vars(LAB_PHLEBOTOMY,Quarter), ncol = 4)+
+  theme_minimal()
+}
+
+
+
+
+
+
+
+
+
+
+
+
+#This report shows TAT metrics for `r site` produced on `r today()`.
+ 
+```
+This report shows TAT metrics for Misericordia produced on `r today()`.
+
+```{r alpha}
+
+data2 <- as_tibble(data<-read.csv(file.choose(),header=T))
+###---###	\\Ad.wrha.mb.ca\wrha\REGION\SHARED\DSM Shared\Alissa\MHC
+#data2<-data2%>%mutate(Quarter=quarter(dmy_hms(REGDATETIME), with_year=TRUE))
+data2<-data2%>%addq_dmy_hms(REGDATETIME)
+
+data2%>%group_by(Quarter,TDESC)%>%tally()%>%
+	ggplot()+
+		geom_line(mapping=aes(x=Quarter, y=n, group=TDESC, color=fct_reorder2(TDESC,Quarter,n)),size=1.5)+
+		geom_point(mapping=aes(x=Quarter, y=n, group=TDESC, color=TDESC), shape=21, size=3.5, fill="white", stroke=1.5)+
+		theme_minimal()+
+		labs(title="Volume & Cost: i-Stat Use",
+			y="Test Utilization",
+			x="Calendar Quarter",
+			color="")+
+		coord_cartesian(ylim= c(0,70))
+```
+
+```{r beta}
+data2%>%
+	volplot(TAT)+
+	labs(title="iStat Arrived to Result")
+```
+\newpage
+```{r delta}
+outl<-data2%>%filter(TAT>=500)%>%
+	arrange(Quarter, REGDATETIME)%>%
+	select(Quarter, REGDATETIME,TAT)
+outl%>%	
+	knitr::kable(caption="iSTAT Outliers >500")
+```
+
+```{r gamma}
+data2%>%filter(TAT<500)%>%
+	volplot(TAT)+
+	labs(title="iSTAT Arrived to Result - <500")
+```
+
+```{r}
+data2%>%
+	cumplot(TAT)+
+	labs(title="iSTAT Arrived to Result")+
+	coord_cartesian(xlim= c(0,115))
+```
+
+```{r}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+#data4 <- as_tibble(data<-read.csv(file.choose(),header=T))
+data4<-bind_rows(as_tibble(data<-read.csv(file.choose(),header=T)),as_tibble(data<-read.csv(file.choose(),header=T)))
+#\\Ad.wrha.mb.ca\wrha\REGION\Shared\DSM Shared\Chemistry\IT\ER\Tony\iStat\Data
+
+
+data4<-data4%>%addq_dmy(REQUESTEDDATE)
+```
+\newpage
+in house iSTAT
+```{r B1}
+data4%>%drawtable()%>%
+knitr::kable(caption="Draw Type")
+
+data4%>%cumplot(ARRIVED_RESULTAUTH)+
+labs(title="In House i Stat - Cummulative runing in with 90th percentile as reference, by Quarter")
+```
+\newpage
+
+```{r B1.1}
+data4%>%group_by(Quarter,SHORT_DESC)%>%tally()%>%
+ggplot()+
+geom_line(mapping=aes(x=Quarter, y=n, group=SHORT_DESC, color=fct_reorder2(SHORT_DESC,Quarter,n)),size=1.5)+
+geom_point(mapping=aes(x=Quarter, y=n, group=SHORT_DESC, color=SHORT_DESC), shape=21, size=3.5, fill="white", stroke=1.5)+
+theme_minimal()+
+labs(
+title="Volume & Cost: i-Stat Use",
+y="Test Utilization",
+x="Calendar Quarter",
+color="")+
+coord_cartesian(ylim= c(0,70))
+```
+\newpage
+```{r}
+data4%>%volplot(ARRIVED_RESULTAUTH)+
+labs(
+ title="In-House i-STAT, Arrived to Result")
+
+
+outl<-data4%>%filter(ARRIVED_RESULTAUTH>=500)%>%
+arrange(Quarter, REQUESTEDDATE)%>%
+select(Quarter, REQUESTEDDATE,ARRIVED_RESULTAUTH
+)
+
+outl%>%
+knitr::kable(caption=">500")
+```
+
+```{r B2}
+countremoved<-data4%>%filter(COLLECTEDDAY=="SAT"| COLLECTEDDAY=="SUN"| SHIFT=="Evening")%>%count()
+
+
+data4%>%
+filter(COLLECTEDDAY!="SAT", COLLECTEDDAY!="SUN", SHIFT!="Evening", ORDERINGDOC!="QCTECH" )%>%
+volplot(ARRIVED_RESULTAUTH)+
+labs(
+ title=paste0("In-House i-STAT, Arrived to Result Omitting-"),
+ subtitle=paste0("Removed ", countremoved," SAT/SUN, Evenings"))
+ 
+ 
+```
+\newpage
+ ```{r B3}
+ 
+ data4%>%
+filter(COLLECTEDDAY!="SAT", COLLECTEDDAY!="SUN", SHIFT!="Evening", ORDERINGDOC!="QCTECH" )%>%
+cumplot(ARRIVED_RESULTAUTH)+
+labs(
+ title="In House i Stat - Cummulative, - Arrived to Result",
+ subtitle=paste0("Removed ", countremoved," SAT/SUN, Evenings"))
+
+```
+
+
+
+```{r c0}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+
+
+data5 <- as_tibble(data<-read.csv(file.choose(),header=T))
+  ##  \\Ad.wrha.mb.ca\wrha\REGION\SHARED\DSM Shared\Chemistry\IT\ER\Tony\MHC\Data
+
+ data5<-data5%>%addq_dmy(REQUESTEDDATE)
+ data5backup<-data5
+ data5prime<-data5%>%filter(REQLOCATION=="MPRIME")
+ 
+ data5<-data5%>%filter(REQLOCATION!="MPRIME")
+ ```
+ \newpage
+```{r c1_0}
+data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^U"))%>%
+drawtable()%>%knitr::kable(caption="Urgent Draw Type")
+```
+
+```{r c1}
+ data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^U"))%>%
+ volplot2(ARRIVED_RESULTAUTH)+
+ labs(title="Urgent All analytes",
+  subtitle="Arrived To Result")
+```
+
+```{r c2}
+ data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^U"))%>%
+ cumplot2(ARRIVED_RESULTAUTH)+
+ labs(title="Urgent All analytes",
+  subtitle="Arrived To Result")
+ ```
+
+ \newpage
+```{r c3}
+data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+drawtable()%>%knitr::kable(caption="Urgent CBC Draw Type")
+```
+
+```{r c4}
+data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+ volplot2(ARRIVED_RESULTAUTH)+
+ labs(title="Urgent CBC",
+ subtitle="Arrived To Result")
+```
+
+```{r c5}
+data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+ cumplot2(ARRIVED_RESULTAUTH)+
+ labs(title="Urgent CBC",
+ subtitle="Arrived To Result")
+ ```
+ 
+\newpage
+
+```{r c6}
+ 
+ ### COLLECTED_TO_ARRIVED
+ data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^U"))%>%
+drawtable()%>%knitr::kable(caption="Urgent Draw Type")
+```
+
+
+```{r c7}    
+ data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^U"))%>%
+ volplot2(COLLECTED_TO_ARRIVED)+
+ labs(title="Urgent All analytes",
+ subtitle="Collected to Arrived")
+  ```
+
+```{r c8}
+ data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^U"))%>%
+ cumplot2(COLLECTED_TO_ARRIVED)+
+ labs(title="Urgent All analytes",
+ subtitle="Collected to Arrived")
+
+ ```
+\newpage
+```{r c9}
+
+data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+drawtable()%>%knitr::kable(caption="Urgent CBC Draw Type")
+
+ ```
+
+```{r c10}
+data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+ volplot2(COLLECTED_TO_ARRIVED)+
+ labs(title="Urgent CBC",
+ subtitle="Collected to Arrived")
+ ```
+
+```{r c11}
+data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+ cumplot2(COLLECTED_TO_ARRIVED)+
+ labs(title="Urgent CBC",
+ subtitle="Collected to Arrived") 
+  ```
+\newpage
+  ROUTINE
+```{r c20}
+ 
+ ############ROUTINE
+ 
+ data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^R"))%>%
+drawtable()%>%knitr::kable(caption="Routine Draw Type")
+    ```
+
+```{r c21} 
+ data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^R"))%>%
+ volplot2(ARRIVED_RESULTAUTH)+
+ labs(title="Routine All analytes",
+  subtitle="Arrived To Result")
+ ```
+
+```{r c22} 
+ data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^R"))%>%
+ cumplot2(ARRIVED_RESULTAUTH)+
+ labs(title="Routine All analytes",
+  subtitle="Arrived To Result")
+
+ ```
+\newpage
+```{r c23} 
+data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^R"), SHORT_DESC=="WBC" )%>%
+drawtable()%>%knitr::kable(caption="Routine Draw Type")
+```
+
+```{r c24} 
+data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^R"), SHORT_DESC=="WBC" )%>%
+ volplot2(ARRIVED_RESULTAUTH)+
+ labs(title="Routine CBC",
+  subtitle="Arrived To Result")
+```
+
+```{r c25} 
+data5%>%filter(ARRIVED_RESULTAUTH>=5, str_detect(PRIORITY, "^R"), SHORT_DESC=="WBC" )%>%
+ cumplot2(ARRIVED_RESULTAUTH)+
+ labs(title="Routine CBC",
+  subtitle="Arrived To Result")
+ ```
+\newpage
+```{r c26} 
+  ### COLLECTED_TO_ARRIVED
+# "Routine"
+ 
+data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^R"))%>%
+drawtable()%>%knitr::kable(caption="Routine Draw Type")
+```
+
+```{r c27} 
+    
+ data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^R"))%>%
+ volplot2(COLLECTED_TO_ARRIVED)+
+ labs(title="Routine All analytes",
+ subtitle="Collected to Arrived")+
+ coord_cartesian(xlim= c(0,500))
+ ```
+
+```{r c28} 
+    
+ data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^R"))%>%
+ cumplot2(COLLECTED_TO_ARRIVED)+
+ labs(title="Routine All analytes",
+ subtitle="Collected to Arrived")+
+ coord_cartesian(xlim= c(0,500))
+```
+\newpage
+```{r c29} 
+    
+data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^R"), SHORT_DESC=="WBC" )%>%
+drawtable()%>%knitr::kable(caption="Routine CBC Draw Type")
+```
+
+```{r c30} 
+    
+data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^R"), SHORT_DESC=="WBC" )%>%
+ volplot2(COLLECTED_TO_ARRIVED)+
+ labs(title="Routine CBC",
+ subtitle="Collected to Arrived")+
+ coord_cartesian(xlim= c(0,500))
+```
+
+```{r c31} 
+data5%>%filter(COLLECTED_TO_ARRIVED>=5, str_detect(PRIORITY, "^R"), SHORT_DESC=="WBC" )%>%
+ cumplot2(COLLECTED_TO_ARRIVED)+
+ labs(title="Routine CBC",
+ subtitle="Collected to Arrived")+
+ coord_cartesian(xlim= c(0,500))
+ 
+ 
+   ############
+ ```
+
+ ```{r c40} 
+
+ #1b Percent of WBC Urgent samples c-r in 2hrs ALL
+data5%>%mutate(threshold=COLLECTED_TO_AUTHORISED<=120)%>%
+ mutate(PRIORITY=str_replace(PRIORITY,"-\\d",""))%>%
+ filter(PRIORITY=="Urgent", SHORT_DESC=="WBC")%>%
+group_by(Quarter)%>%
+group_by(LAB_PHLEBOTOMY,threshold, add=TRUE)%>%
+tally()%>%
+mutate(percent = n/sum(n))%>%
+filter(threshold=="TRUE")%>%
+ggplot()+
+geom_col(mapping=aes(x=Quarter,y=percent), fill=shcolor["blue"], color=shcolor["purple"])+
+geom_text(mapping=aes(x=Quarter,y=percent-.1, label=round(percent,2)), color="White")+
+facet_grid(~fct_rev(LAB_PHLEBOTOMY))+
+theme_minimal()+
+labs(
+title="CBC - Urgent Collected – Result meeting threshold",
+subtitle="Collected to Resulted in 2hrs, By LAB_PHLEBOTOMY Yes or No"
+)+
+coord_cartesian(ylim= c(0,1))
+
+```
+
+```{r c41} 
+ #1a Percent of All Urgent samples c-r in 2hrs ALL
+data5%>%mutate(threshold=COLLECTED_TO_AUTHORISED<=120)%>%
+ mutate(PRIORITY=str_replace(PRIORITY,"-\\d",""))%>%
+ filter(PRIORITY=="Urgent")%>%
+group_by(Quarter)%>%
+group_by(LAB_PHLEBOTOMY,threshold, add=TRUE)%>%
+tally()%>%
+mutate(percent = n/sum(n))%>%
+filter(threshold=="TRUE")%>%
+ggplot()+
+geom_col(mapping=aes(x=Quarter,y=percent), fill=shcolor["green"], color=shcolor["purple"])+
+geom_text(mapping=aes(x=Quarter,y=percent-.1, label=round(percent,2)), color="White")+
+facet_grid(~fct_rev(LAB_PHLEBOTOMY))+
+theme_minimal()+
+labs(
+title="Hematology & Chemistry - Urgent Collected – Result meeting threshold",
+subtitle="Collected to Resulted in 2hrs By LAB_PHLEBOTOMY Yes or No")+
+ coord_cartesian(ylim= c(0,1))
+ ```
+
+
+\newpage
+```{r c42} 
+
+ 
+##2 C-A U All
+data5%>%filter(COLLECTED_TO_AUTHORISED>=5, str_detect(PRIORITY, "^U"))%>%
+drawtable()%>%
+knitr::kable(caption="Draw Type")
+    
+ data5%>%filter(COLLECTED_TO_AUTHORISED>=5, str_detect(PRIORITY, "^U"))%>%
+ volplot2(COLLECTED_TO_AUTHORISED)+
+ labs(title="Urgent All analytes",
+  subtitle="Collected To Authorized")
+   ```
+
+```{r c43} 
+ 
+ data5%>%filter(COLLECTED_TO_AUTHORISED>=5, str_detect(PRIORITY, "^U"))%>%
+ cumplot2(COLLECTED_TO_AUTHORISED)+
+ labs(title="Urgent All analytes",
+  subtitle="Collected To Authorized")
+
+  
+  ```
+\newpage
+```{r c44}
+# c-a U CBC
+data5%>%filter(COLLECTED_TO_AUTHORISED>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+drawtable()%>%
+knitr::kable(caption="Draw Type")
+
+data5%>%filter(COLLECTED_TO_AUTHORISED>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+ volplot2(COLLECTED_TO_AUTHORISED)+
+ labs(title="Urgent CBC",
+ subtitle="Collected To Authorized")
+  ```
+
+```{r c45}
+data5%>%filter(COLLECTED_TO_AUTHORISED>=5, str_detect(PRIORITY, "^U"), SHORT_DESC=="WBC" )%>%
+ cumplot2(COLLECTED_TO_AUTHORISED)+
+ labs(title="Urgent CBC",
+ subtitle="Collected To Authorized")
+```
+\newpage
+```{r c46}
+ 
+ data5%>%
+ mutate(SPECMONTH=month(SPECMONTH, label=TRUE))%>%
+ group_by(SHIFT, SPECMONTH)%>%
+ tally()%>%
+ ggplot(mapping=aes(x=SPECMONTH,y=n,fill=SHIFT))+
+ geom_col(position="dodge")+
+ theme_minimal()
+ ```
+\newpage
+```{r c47}
+ 
+  data5%>%
+  mutate(SPECMONTH=month(SPECMONTH, label=TRUE))%>%
+ group_by(COLLECTEDDAY, SPECMONTH)%>%
+ tally()%>%filter(COLLECTEDDAY!="")%>%
+ ggplot(mapping=aes(
+	x=SPECMONTH,
+	y=n,
+	fill=fct_relevel(COLLECTEDDAY,c("Sun", "Mon","Tue","Wed","Thu","Fri","Sat") )))+
+ geom_col(position="dodge")+
+ labs(fill="Day")+
+ theme_minimal()
+ 
+ ```
+\newpage
+```{r c48}
+
+  data5%>%
+ mutate(SPECMONTH=month(SPECMONTH, label=TRUE))%>%
+ group_by(LAB_PHLEBOTOMY, SPECMONTH)%>%
+ tally()%>%
+ ggplot(mapping=aes(x=SPECMONTH,y=n,fill=LAB_PHLEBOTOMY))+
+ geom_col(position="dodge")+
+ theme_minimal()
+```
+\newpage
+```{r c49}
+
+ #MHC locations
+ data5%>%
+ filter(REQLOCATION %in% c("CEDRR","C3N","CRTR","RIVR"))%>%
+ filter(COLLECTED_TO_AUTHORISED>=5)%>%
+ mutate(PRIORITY=str_replace(PRIORITY,"-\\d",""))%>%
+ volplot2(COLLECTED_TO_AUTHORISED, LAB_PHLEBOTOMY=PRIORITY )+
+ labs(title="MHC requisition locations",
+  subtitle="Cedar Grove, Cornish 3 North, Crocus Trail, Riverside Lane")
+  ```
+
+```{r c50}
+
+  data5%>%
+ filter(REQLOCATION %in% c("CEDRR","C3N","CRTR","RIVR"))%>%
+ filter(COLLECTED_TO_AUTHORISED>=5)%>%
+ mutate(PRIORITY=str_replace(PRIORITY,"-\\d",""))%>%
+ cumplot2(COLLECTED_TO_AUTHORISED, LAB_PHLEBOTOMY=PRIORITY )+
+ labs(title="MHC requisition locations",
+  subtitle="Cedar Grove, Cornish 3 North, Crocus Trail, Riverside Lane")
+  ```
+\newpage
+```{r c51}
+
+  #########MIS Place
+   data5%>%
+ filter(REQLOCATION %in% c("APPL","ROBN","ROSE","SLEEP"))%>%
+ filter(COLLECTED_TO_AUTHORISED>=5)%>%
+ mutate(PRIORITY=str_replace(PRIORITY,"-\\d",""))%>%
+ volplot2(COLLECTED_TO_AUTHORISED, LAB_PHLEBOTOMY=PRIORITY )+
+ labs(title="Mis Place",
+  subtitle="Apple Tree Lane, Robin Way, Rose Walk")
+  ```
+\newpage
+```{r c52}
+
+  data5%>%
+ filter(REQLOCATION %in% c("CEDRR","C3N","CRTR","RIVR"))%>%
+ filter(COLLECTED_TO_AUTHORISED>=5)%>%
+ mutate(PRIORITY=str_replace(PRIORITY,"-\\d",""))%>%
+ cumplot2(COLLECTED_TO_AUTHORISED, LAB_PHLEBOTOMY=PRIORITY )+
+ labs(title="Mis Place requisition locations",
+  subtitle="Apple Tree Lane, Robin Way, Rose Walk")
+  ```
+\newpage
+```{r c53}
+  
+  ######PRIME (from Backup)
+data5backup%>%
+   filter(REQLOCATION =="MPRIME")%>%
+   filter(COLLECTED_TO_AUTHORISED>=5)%>%
+ mutate(PRIORITY=str_replace(PRIORITY,"-\\d",""))%>%
+ volplot2(COLLECTED_TO_AUTHORISED, LAB_PHLEBOTOMY=PRIORITY )+
+ labs(title="Prime Clinic")
+```
+\newpage
+```{r c54}
+data5backup%>%
+   filter(REQLOCATION =="MPRIME")%>%
+   filter(COLLECTED_TO_AUTHORISED>=5)%>%
+ mutate(PRIORITY=str_replace(PRIORITY,"-\\d",""))%>%
+ cumplot2(COLLECTED_TO_AUTHORISED, LAB_PHLEBOTOMY=PRIORITY )+
+ labs(title="Prime Clinic")
+```
+
+
+
+```
